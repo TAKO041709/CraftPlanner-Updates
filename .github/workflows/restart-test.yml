@@ -1,0 +1,37 @@
+name: Publish v2.2.36 restart test
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare and publish test UI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --location --retry 3 'https://github.com/TAKO041709/CraftPlanner-Updates/releases/download/v2.2.34/CraftPlanner_UI_Update_v2.2.34.zip' -o old.zip
+          echo '9418464142b0b2843c6a96365f57e2649b3d8813188f0ae4a6c0a71ff1494bf7  old.zip' | sha256sum -c -
+          python - <<'PY'
+          import json, zipfile, hashlib
+          from pathlib import Path
+          name='CraftPlanner_UI_Update_v2.2.36.zip'
+          with zipfile.ZipFile('old.zip') as src:
+              assert set(src.namelist()) == {'manifest.json','index.html','settings.html','chat.html','chat.js','app-shell.js'}
+              manifest=json.loads(src.read('manifest.json'))
+              assert manifest['version']=='2.2.34'
+              manifest['version']='2.2.36'
+              with zipfile.ZipFile(name,'w',zipfile.ZIP_DEFLATED) as dst:
+                  for item in src.namelist():
+                      dst.writestr(item,json.dumps(manifest,ensure_ascii=False).encode() if item=='manifest.json' else src.read(item))
+          feed={'version':'2.2.36','url':'https://github.com/TAKO041709/CraftPlanner-Updates/releases/download/v2.2.36/'+name,'sha256':hashlib.sha256(Path(name).read_bytes()).hexdigest()}
+          Path('latest-ui.json').write_text(json.dumps(feed,indent=2)+'\n')
+          PY
+          gh release create v2.2.36 CraftPlanner_UI_Update_v2.2.36.zip --title 'v2.2.36 UI restart test' --notes 'Restart test; unchanged UI files.'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add latest-ui.json
+          git commit -m 'Publish v2.2.36 UI feed'
+          git push
