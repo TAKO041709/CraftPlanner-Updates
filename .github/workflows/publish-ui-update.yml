@@ -68,12 +68,12 @@ jobs:
           anchor_global = "  const label='罰金 ×1.5：'+(enabled?'ON':'OFF');"
           assert html.count(anchor_global) == 1
           html = html.replace(anchor_global, """  global.style.background = enabled ? '#28764e' : '#293b52';
-  global.style.color = enabled ? '#ffffff' : '#dce6f2';
-  global.style.border = enabled ? '1px solid #54d99a' : '1px solid #52657a';
-  global.style.boxShadow = enabled ? '0 0 12px rgba(74,220,144,.4)' : 'none';
-  global.style.filter = 'none';
-  global.style.textShadow = 'none';
-  const label='罰金 ×1.5：'+(enabled?'ON':'OFF');""", 1)
+          global.style.color = enabled ? '#ffffff' : '#dce6f2';
+          global.style.border = enabled ? '1px solid #54d99a' : '1px solid #52657a';
+          global.style.boxShadow = enabled ? '0 0 12px rgba(74,220,144,.4)' : 'none';
+          global.style.filter = 'none';
+          global.style.textShadow = 'none';
+          const label='罰金 ×1.5：'+(enabled?'ON':'OFF');""", 1)
           contents['index.html'] = html.encode('utf-8')
           manifest['version'] = '2.2.49'
           for name in manifest['sha256']:
