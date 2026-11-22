@@ -94,4 +94,4 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add latest-ui.json
           git commit -m "Activate verified UI update"
-          git push
+          git push origin HEAD:main
