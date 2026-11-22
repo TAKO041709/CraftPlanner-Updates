@@ -1,9 +1,11 @@
-name: Activate approved UI update
+name: Validate and activate UI release
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version of an EXISTING GitHub release containing CraftPlanner_UI_Update_vX.Y.Z.zip'
+        description: 'Existing UI release version, e.g. 2.2.46'
         required: true
         type: string
 permissions:
@@ -16,49 +18,80 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download and validate existing release ZIP
+      - name: Validate published ZIP and prepare update feed
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
+          VERSION_INPUT: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${RELEASE_TAG#v}"
+          else
+            VERSION="$VERSION_INPUT"
+          fi
+          export VERSION
           python - <<'PY'
           import os,re
           v=os.environ['VERSION']
-          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',v): raise SystemExit('Invalid version')
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',v):
+              raise SystemExit('Not a UI semver release; refusing to activate')
           PY
           file="CraftPlanner_UI_Update_v${VERSION}.zip"
           gh release download "v${VERSION}" --pattern "$file" --dir .
+          # Reference is the last known working UI update schema, not the obsolete "files" schema.
+          gh release download v2.2.45 --pattern CraftPlanner_UI_Update_v2.2.45.zip --dir .
           python - <<'PY'
-          import os,json,zipfile,hashlib,re
+          import hashlib,json,os,zipfile
           from pathlib import Path
-          v=os.environ['VERSION']; file=Path(f'CraftPlanner_UI_Update_v{v}.zip')
-          expected={'manifest.json','index.html','settings.html','chat.html','chat.js','app-shell.js'}
+          v=os.environ['VERSION']
+          expected={'index.html','settings.html','chat.html','chat.js','app-shell.js'}
+          file=Path(f'CraftPlanner_UI_Update_v{v}.zip')
+          with zipfile.ZipFile('CraftPlanner_UI_Update_v2.2.45.zip') as ref:
+              reference=json.loads(ref.read('manifest.json'))
+          product=reference.get('product')
+          if not isinstance(product,str) or not product: raise SystemExit('Missing known-good product ID')
           with zipfile.ZipFile(file) as z:
               names=z.namelist()
-              if len(names)!=len(set(names)) or set(names)!=expected: raise SystemExit(f'Unexpected files: {names}')
-              if any(z.getinfo(n).file_size>10_000_000 for n in names): raise SystemExit('File too large')
+              if len(names)!=6 or set(names)!=expected|{'manifest.json'}:
+                  raise SystemExit('Invalid ZIP entries (missing/extra/duplicate)')
+              if any(z.getinfo(n).file_size>1024*1024 for n in expected):
+                  raise SystemExit('UI asset exceeds application limit')
               manifest=json.loads(z.read('manifest.json'))
-              if manifest.get('version')!=v: raise SystemExit('Manifest version mismatch')
-              hashes=manifest.get('files')
-              if not isinstance(hashes,dict) or set(hashes)!=expected-{'manifest.json'}: raise SystemExit('Manifest file hashes missing')
-              for n in hashes:
-                  actual=hashlib.sha256(z.read(n)).hexdigest()
-                  if hashes[n].lower()!=actual: raise SystemExit('Hash mismatch: '+n)
-          existing=json.loads(Path('latest-ui.json').read_text())
-          def parts(s):return tuple(map(int,s.split('.')))
-          if parts(v)<=parts(existing['version']): raise SystemExit('Version must be newer than current feed')
+              if manifest.get('version')!=v or manifest.get('product')!=product:
+                  raise SystemExit('Incompatible product/version')
+              hashes=manifest.get('sha256')
+              if not isinstance(hashes,dict) or set(hashes)!=expected:
+                  raise SystemExit('Missing required sha256 file map')
+              for n in expected:
+                  if hashlib.sha256(z.read(n)).hexdigest()!=hashes[n]:
+                      raise SystemExit('Invalid file SHA256: '+n)
+          feed_path=Path('latest-ui.json')
+          existing=json.loads(feed_path.read_text())
+          parts=lambda s:tuple(map(int,s.split('.')))
+          if parts(v)<parts(existing['version']):
+              raise SystemExit('Refusing to downgrade update feed')
           url=f'https://github.com/TAKO041709/CraftPlanner-Updates/releases/download/v{v}/{file.name}'
           feed={'version':v,'url':url,'sha256':hashlib.sha256(file.read_bytes()).hexdigest()}
-          Path('latest-ui.json').write_text(json.dumps(feed,indent=2)+'\n')
-          print('Validated UI release:',v)
+          if parts(v)==parts(existing['version']):
+              if feed!=existing: raise SystemExit('Existing version differs from release; refusing replacement')
+              print('Release already active; no change required')
+          else:
+              feed_path.write_text(json.dumps(feed,indent=2)+'\n')
+              print('Verified and activated',v)
           PY
-      - name: Publish latest-ui.json
+      - name: Commit update feed only when changed
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION_INPUT: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
+          set -euo pipefail
+          if git diff --quiet -- latest-ui.json; then
+            echo "Feed already up to date"
+            exit 0
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add latest-ui.json
-          git commit -m "Activate verified UI update v$VERSION"
+          git commit -m "Activate verified UI update"
           git push
