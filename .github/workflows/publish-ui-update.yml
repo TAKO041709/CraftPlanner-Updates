@@ -45,14 +45,14 @@ jobs:
           assert "let enabled=false,scheduled=false;" in html
           html = html.replace("let enabled=false,scheduled=false;", "let enabled=false,scheduled=false; window.__cpGlobalFineEnabled=false;", 1)
           click_old = """    const current=findButtons();
-    for(const btn of current){
-     const isOn=/ON|オン/i.test(btn.textContent||'')&&!/OFF/i.test(btn.textContent||'');
-     if(isOn!==enabled)btn.click();
-    }
-    schedule();"""
+          for(const btn of current){
+           const isOn=/ON|オン/i.test(btn.textContent||'')&&!/OFF/i.test(btn.textContent||'');
+           if(isOn!==enabled)btn.click();
+          }
+          schedule();"""
           click_new = """    window.__cpGlobalFineEnabled=enabled;
-    if(typeof refRender==='function')refRender();
-    schedule();"""
+          if(typeof refRender==='function')refRender();
+          schedule();"""
           assert html.count(click_old) == 1, 'Global toggle click handler not found'
           html = html.replace(click_old, click_new, 1)
           assert html.count('window.__cpGlobalFineEnabled=enabled;') == 1
