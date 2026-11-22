@@ -33,7 +33,7 @@ jobs:
           with zipfile.ZipFile('previous.zip') as z:
               contents = {name: z.read(name) for name in z.namelist()}
           manifest = json.loads(contents['manifest.json'])
-          assert manifest['version'] == '2.2.46'
+          assert manifest['version'] == '2.2.47'
           for name, expected in manifest['sha256'].items():
               assert hashlib.sha256(contents[name]).hexdigest() == expected, f'Original hash mismatch: {name}'
           html = contents['index.html'].decode('utf-8')
@@ -60,7 +60,7 @@ jobs:
           html = html.replace(anchor, css + anchor, 1)
           assert 'data-crime-toggle-15' in html and 'id="crimeOneHalf"' in html
           contents['index.html'] = html.encode('utf-8')
-          manifest['version'] = '2.2.47'
+          manifest['version'] = '2.2.48'
           for name in manifest['sha256']:
               manifest['sha256'][name] = hashlib.sha256(contents[name]).hexdigest()
           contents['manifest.json'] = (json.dumps(manifest, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
@@ -70,7 +70,7 @@ jobs:
                   z.writestr(name, data)
           with zipfile.ZipFile(out) as z:
               m = json.loads(z.read('manifest.json'))
-              assert m['version'] == '2.2.47'
+              assert m['version'] == '2.2.48'
               for name, digest in m['sha256'].items():
                   assert hashlib.sha256(z.read(name)).hexdigest() == digest
           digest = hashlib.sha256(out.read_bytes()).hexdigest()
@@ -98,8 +98,8 @@ jobs:
           from pathlib import Path
           p=Path('latest-ui.json')
           data=json.loads(p.read_text(encoding='utf-8'))
-          assert data['version'] == '2.2.46', 'Latest version changed; inspect before publishing'
-          data['version']='2.2.47'
+          assert data['version'] == '2.2.47', 'Latest version changed; inspect before publishing'
+          data['version']='2.2.48'
           data['url']='https://github.com/${{ github.repository }}/releases/download/v2.2.47/CraftPlanner_UI_Update_v2.2.47.zip'
           data['sha256']=Path('release-sha256.txt').read_text().strip()
           p.write_text(json.dumps(data,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
