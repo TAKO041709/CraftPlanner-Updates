@@ -1,0 +1,63 @@
+name: Publish compatible UI v2.2.45
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: publish-ui-feed
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild update using original app manifest schema
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v2.2.44 --pattern CraftPlanner_UI_Update_v2.2.44.zip
+          gh release download v2.2.36 --pattern CraftPlanner_UI_Update_v2.2.36.zip
+          python - <<'PY'
+          import hashlib,json,zipfile
+          from pathlib import Path
+          assets=['index.html','settings.html','chat.html','chat.js','app-shell.js']
+          with zipfile.ZipFile('CraftPlanner_UI_Update_v2.2.36.zip') as old:
+              reference=json.loads(old.read('manifest.json'))
+          product=reference.get('product')
+          if not isinstance(product,str) or not product: raise SystemExit('Reference manifest lacks product identifier')
+          with zipfile.ZipFile('CraftPlanner_UI_Update_v2.2.44.zip') as z:
+              names=z.namelist()
+              if len(names)!=6 or set(names)!=set(assets+['manifest.json']): raise SystemExit('Unexpected v2.2.44 assets')
+              source=json.loads(z.read('manifest.json'))
+              if source.get('version')!='2.2.44': raise SystemExit('Wrong source version')
+              content={n:z.read(n) for n in assets}
+              for n in assets:
+                  if len(content[n])>1024*1024 or hashlib.sha256(content[n]).hexdigest()!=source.get('files',{}).get(n):raise SystemExit('Source asset mismatch: '+n)
+          manifest={'product':product,'version':'2.2.45','sha256':{n:hashlib.sha256(content[n]).hexdigest() for n in assets}}
+          if reference.get('minEngineVersion'):manifest['minEngineVersion']=reference['minEngineVersion']
+          target=Path('CraftPlanner_UI_Update_v2.2.45.zip')
+          with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as z:
+              z.writestr('manifest.json',json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
+              for n in assets:z.writestr(n,content[n])
+          with zipfile.ZipFile(target) as z:
+              m=json.loads(z.read('manifest.json'))
+              assert m['product']==product and m['version']=='2.2.45'
+              for n in assets:assert hashlib.sha256(z.read(n)).hexdigest()==m['sha256'][n]
+          current=json.loads(Path('latest-ui.json').read_text())
+          if tuple(map(int,current['version'].split('.')))>=(2,2,45):raise SystemExit('Already activated v2.2.45 or later')
+          feed={'version':'2.2.45','url':'https://github.com/TAKO041709/CraftPlanner-Updates/releases/download/v2.2.45/'+target.name,'sha256':hashlib.sha256(target.read_bytes()).hexdigest()}
+          Path('latest-ui.json').write_text(json.dumps(feed,indent=2)+'\n')
+          print('Validated compatible UI package for',product)
+          PY
+      - name: Publish verified ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create v2.2.45 CraftPlanner_UI_Update_v2.2.45.zip --title "Craft Planner UI v2.2.45 (compatibility fix)" --notes "Fixes update manifest schema to match the existing application. UI assets from v2.2.44 are preserved."
+      - name: Activate feed
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add latest-ui.json
+          git commit -m "Activate compatible UI v2.2.45"
+          git push
