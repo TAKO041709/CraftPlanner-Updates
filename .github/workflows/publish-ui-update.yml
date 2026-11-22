@@ -17,13 +17,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: true
-      - name: Download verified v2.2.48 UI package
+      - name: Download verified v2.2.49 UI package
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3             'https://github.com/${{ github.repository }}/releases/download/v2.2.48/CraftPlanner_UI_Update_v2.2.48.zip'             -o previous.zip
-          echo '21d6bcd2158168ccf0fc4b5448c3ea252c3ceae807a3c2e369e836475e317193  previous.zip' | sha256sum -c -
-      - name: Patch UI, regenerate hashes, and package v2.2.49
+          curl --fail --location --retry 3             'https://github.com/${{ github.repository }}/releases/download/v2.2.49/CraftPlanner_UI_Update_v2.2.49.zip'             -o previous.zip
+          echo '6cf074d000991838ac8d22d7bdee3a60c19310f7cdb7be324f04dc177ec5d16f  previous.zip' | sha256sum -c -
+      - name: Patch UI, regenerate hashes, and package v2.2.50
         shell: bash
         run: |
           set -euo pipefail
@@ -33,59 +33,41 @@ jobs:
           with zipfile.ZipFile('previous.zip') as z:
               contents = {name: z.read(name) for name in z.namelist()}
           manifest = json.loads(contents['manifest.json'])
-          assert manifest['version'] == '2.2.48'
+          assert manifest['version'] == '2.2.49'
           for name, expected in manifest['sha256'].items():
               assert hashlib.sha256(contents[name]).hexdigest() == expected, f'Original hash mismatch: {name}'
           html = contents['index.html'].decode('utf-8')
-          # Both the list button and the detail dialog button need an explicit OFF style.
-          anchor = '#crimeMultiplier[aria-pressed="true"]'
-          assert html.count(anchor) == 1
-          css = """
-          button[data-crime-toggle-15][aria-pressed="false"],
-          button[data-crime-toggle-15].crime-multiplier-off,
-          #crimeOneHalf[aria-pressed="false"] {
-            background:#293b52 !important;color:#dce6f2 !important;
-            border:1px solid #52657a !important;
-            box-shadow:none !important;filter:none !important;
-            text-shadow:none !important;animation:none !important;
-          }
-          button[data-crime-toggle-15][aria-pressed="true"],
-          button[data-crime-toggle-15].crime-multiplier-on,
-          #crimeOneHalf[aria-pressed="true"] {
-            background:#28764e !important;color:#fff !important;
-            border:1px solid #54d99a !important;
-            box-shadow:0 0 12px rgba(74,220,144,.4) !important;
-          }
-          """
-          html = html.replace(anchor, css + anchor, 1)
-          assert 'data-crime-toggle-15' in html and 'id="crimeOneHalf"' in html
-          # The screenshot shows the *global* toggle beside 新規追加.
-          # Its inline background was blue regardless of state.
-          old_style = "global.style.cssText='margin:8px 0 12px 10px;padding:9px 15px;border-radius:9px;background:#1e617c;color:#fff;border:1px solid #64b4d2;cursor:pointer;font-weight:600';"
-          new_style = "global.style.cssText='margin:8px 0 12px 10px;padding:9px 15px;border-radius:9px;cursor:pointer;font-weight:600';"
-          assert html.count(old_style) == 1, 'Global toggle styling changed unexpectedly'
-          html = html.replace(old_style, new_style)
-          anchor_global = "  const label='罰金 ×1.5：'+(enabled?'ON':'OFF');"
-          assert html.count(anchor_global) == 1
-          html = html.replace(anchor_global, """  global.style.background = enabled ? '#28764e' : '#293b52';
-          global.style.color = enabled ? '#ffffff' : '#dce6f2';
-          global.style.border = enabled ? '1px solid #54d99a' : '1px solid #52657a';
-          global.style.boxShadow = enabled ? '0 0 12px rgba(74,220,144,.4)' : 'none';
-          global.style.filter = 'none';
-          global.style.textShadow = 'none';
-          const label='罰金 ×1.5：'+(enabled?'ON':'OFF');""", 1)
+          # Connect the global multiplier to the actual list calculation.
+          # Do not simulate clicking individual buttons: refRender replaces those nodes.
+          amount = "crimeBaseAmount(x)*(crimeListMultiplier.has(x.id)?1.5:1)"
+          assert html.count(amount) >= 1, 'Fine calculation expression not found'
+          html = html.replace(amount, "crimeBaseAmount(x)*((window.__cpGlobalFineEnabled || crimeListMultiplier.has(x.id))?1.5:1)")
+          assert "let enabled=false,scheduled=false;" in html
+          html = html.replace("let enabled=false,scheduled=false;", "let enabled=false,scheduled=false; window.__cpGlobalFineEnabled=false;", 1)
+          click_old = """    const current=findButtons();
+    for(const btn of current){
+     const isOn=/ON|オン/i.test(btn.textContent||'')&&!/OFF/i.test(btn.textContent||'');
+     if(isOn!==enabled)btn.click();
+    }
+    schedule();"""
+          click_new = """    window.__cpGlobalFineEnabled=enabled;
+    if(typeof refRender==='function')refRender();
+    schedule();"""
+          assert html.count(click_old) == 1, 'Global toggle click handler not found'
+          html = html.replace(click_old, click_new, 1)
+          assert html.count('window.__cpGlobalFineEnabled=enabled;') == 1
           contents['index.html'] = html.encode('utf-8')
-          manifest['version'] = '2.2.49'
+          manifest['version'] = '2.2.50'
           for name in manifest['sha256']:
               manifest['sha256'][name] = hashlib.sha256(contents[name]).hexdigest()
           contents['manifest.json'] = (json.dumps(manifest, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
-          out = Path('CraftPlanner_UI_Update_v2.2.49.zip')
+          out = Path('CraftPlanner_UI_Update_v2.2.50.zip')
           with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED) as z:
               for name, data in contents.items():
                   z.writestr(name, data)
           with zipfile.ZipFile(out) as z:
               m = json.loads(z.read('manifest.json'))
-              assert m['version'] == '2.2.49'
+              assert m['version'] == '2.2.50'
               for name, digest in m['sha256'].items():
                   assert hashlib.sha256(z.read(name)).hexdigest() == digest
           digest = hashlib.sha256(out.read_bytes()).hexdigest()
@@ -98,12 +80,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view v2.2.49 >/dev/null 2>&1; then
-            echo 'v2.2.49 already exists; refusing to overwrite it' >&2
+          if gh release view v2.2.50 >/dev/null 2>&1; then
+            echo 'v2.2.50 already exists; refusing to overwrite it' >&2
             exit 1
           fi
-          gh release create v2.2.49 CraftPlanner_UI_Update_v2.2.49.zip             --title 'Craft Planner UI v2.2.49'             --notes 'Fix: global crime list ×1.5 toggle is dark when OFF and green when ON.'             --latest
-          gh release view v2.2.49 --json assets --jq '.assets[].name' | grep -Fx 'CraftPlanner_UI_Update_v2.2.49.zip'
+          gh release create v2.2.50 CraftPlanner_UI_Update_v2.2.50.zip             --title 'Craft Planner UI v2.2.50'             --notes 'Fix: global ×1.5 toggle now updates the displayed crime fines.'             --latest
+          gh release view v2.2.50 --json assets --jq '.assets[].name' | grep -Fx 'CraftPlanner_UI_Update_v2.2.50.zip'
       - name: Update automatic updater metadata
         shell: bash
         run: |
@@ -113,14 +95,14 @@ jobs:
           from pathlib import Path
           p=Path('latest-ui.json')
           data=json.loads(p.read_text(encoding='utf-8'))
-          assert data['version'] == '2.2.48', 'Latest version changed; inspect before publishing'
-          data['version']='2.2.49'
-          data['url']='https://github.com/${{ github.repository }}/releases/download/v2.2.49/CraftPlanner_UI_Update_v2.2.49.zip'
+          assert data['version'] == '2.2.49', 'Latest version changed; inspect before publishing'
+          data['version']='2.2.50'
+          data['url']='https://github.com/${{ github.repository }}/releases/download/v2.2.50/CraftPlanner_UI_Update_v2.2.50.zip'
           data['sha256']=Path('release-sha256.txt').read_text().strip()
           p.write_text(json.dumps(data,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
           PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add latest-ui.json
-          git commit -m 'Publish Craft Planner UI v2.2.49'
+          git commit -m 'Publish Craft Planner UI v2.2.50'
           git push
