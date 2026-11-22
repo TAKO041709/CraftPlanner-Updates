@@ -1,0 +1,64 @@
+name: Activate approved UI update
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version of an EXISTING GitHub release containing CraftPlanner_UI_Update_vX.Y.Z.zip'
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: publish-ui-feed
+  cancel-in-progress: false
+jobs:
+  validate-and-activate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and validate existing release ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os,re
+          v=os.environ['VERSION']
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',v): raise SystemExit('Invalid version')
+          PY
+          file="CraftPlanner_UI_Update_v${VERSION}.zip"
+          gh release download "v${VERSION}" --pattern "$file" --dir .
+          python - <<'PY'
+          import os,json,zipfile,hashlib,re
+          from pathlib import Path
+          v=os.environ['VERSION']; file=Path(f'CraftPlanner_UI_Update_v{v}.zip')
+          expected={'manifest.json','index.html','settings.html','chat.html','chat.js','app-shell.js'}
+          with zipfile.ZipFile(file) as z:
+              names=z.namelist()
+              if len(names)!=len(set(names)) or set(names)!=expected: raise SystemExit(f'Unexpected files: {names}')
+              if any(z.getinfo(n).file_size>10_000_000 for n in names): raise SystemExit('File too large')
+              manifest=json.loads(z.read('manifest.json'))
+              if manifest.get('version')!=v: raise SystemExit('Manifest version mismatch')
+              hashes=manifest.get('files')
+              if not isinstance(hashes,dict) or set(hashes)!=expected-{'manifest.json'}: raise SystemExit('Manifest file hashes missing')
+              for n in hashes:
+                  actual=hashlib.sha256(z.read(n)).hexdigest()
+                  if hashes[n].lower()!=actual: raise SystemExit('Hash mismatch: '+n)
+          existing=json.loads(Path('latest-ui.json').read_text())
+          def parts(s):return tuple(map(int,s.split('.')))
+          if parts(v)<=parts(existing['version']): raise SystemExit('Version must be newer than current feed')
+          url=f'https://github.com/TAKO041709/CraftPlanner-Updates/releases/download/v{v}/{file.name}'
+          feed={'version':v,'url':url,'sha256':hashlib.sha256(file.read_bytes()).hexdigest()}
+          Path('latest-ui.json').write_text(json.dumps(feed,indent=2)+'\n')
+          print('Validated UI release:',v)
+          PY
+      - name: Publish latest-ui.json
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add latest-ui.json
+          git commit -m "Activate verified UI update v$VERSION"
+          git push
