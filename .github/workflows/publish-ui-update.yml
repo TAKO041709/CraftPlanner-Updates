@@ -100,7 +100,7 @@ jobs:
           data=json.loads(p.read_text(encoding='utf-8'))
           assert data['version'] == '2.2.47', 'Latest version changed; inspect before publishing'
           data['version']='2.2.48'
-          data['url']='https://github.com/${{ github.repository }}/releases/download/v2.2.47/CraftPlanner_UI_Update_v2.2.47.zip'
+          data['url']='https://github.com/${{ github.repository }}/releases/download/v2.2.48/CraftPlanner_UI_Update_v2.2.48.zip'
           data['sha256']=Path('release-sha256.txt').read_text().strip()
           p.write_text(json.dumps(data,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
           PY
