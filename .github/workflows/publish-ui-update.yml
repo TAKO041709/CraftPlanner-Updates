@@ -17,13 +17,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: true
-      - name: Download verified v2.2.46 UI package
+      - name: Download verified v2.2.47 UI package
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3             'https://github.com/${{ github.repository }}/releases/download/v2.2.46/CraftPlanner_UI_Update_v2.2.46.zip'             -o previous.zip
-          echo '20870a94e8cf74d84b747b15d128d8003db2d2bef9df73c92b54d052b2eb1584  previous.zip' | sha256sum -c -
-      - name: Patch UI, regenerate hashes, and package v2.2.47
+          curl --fail --location --retry 3             'https://github.com/${{ github.repository }}/releases/download/v2.2.47/CraftPlanner_UI_Update_v2.2.47.zip'             -o previous.zip
+          echo 'ab235c68e5ea5df1baf27cfc88461bfe9ec1caca6f046263d3ea97d096f33e96  previous.zip' | sha256sum -c -
+      - name: Patch UI, regenerate hashes, and package v2.2.48
         shell: bash
         run: |
           set -euo pipefail
@@ -37,23 +37,34 @@ jobs:
           for name, expected in manifest['sha256'].items():
               assert hashlib.sha256(contents[name]).hexdigest() == expected, f'Original hash mismatch: {name}'
           html = contents['index.html'].decode('utf-8')
-          old = 'style="background:${crimeListMultiplier.has(x.id)?\'#28764e\':\'#293b52\'};border:1px solid #6687aa"'
-          new = 'class="${crimeListMultiplier.has(x.id)?\'crime-multiplier-on\':\'crime-multiplier-off\'}"'
-          assert html.count(old) == 1, 'Unexpected multiplier button markup'
-          html = html.replace(old, new)
+          # Both the list button and the detail dialog button need an explicit OFF style.
           anchor = '#crimeMultiplier[aria-pressed="true"]'
           assert html.count(anchor) == 1
-          css = """button[data-crime-toggle-15].crime-multiplier-off{background:#293b52;color:#dce6f2;border:1px solid #52657a;box-shadow:none;filter:none;text-shadow:none}
-          button[data-crime-toggle-15].crime-multiplier-on{background:#28764e;color:#fff;border:1px solid #54d99a;box-shadow:0 0 12px rgba(74,220,144,.4)}
-          button[data-crime-toggle-15].crime-multiplier-off:hover{box-shadow:none;filter:none;text-shadow:none}
+          css = """
+          button[data-crime-toggle-15][aria-pressed="false"],
+          button[data-crime-toggle-15].crime-multiplier-off,
+          #crimeOneHalf[aria-pressed="false"] {
+            background:#293b52 !important;color:#dce6f2 !important;
+            border:1px solid #52657a !important;
+            box-shadow:none !important;filter:none !important;
+            text-shadow:none !important;animation:none !important;
+          }
+          button[data-crime-toggle-15][aria-pressed="true"],
+          button[data-crime-toggle-15].crime-multiplier-on,
+          #crimeOneHalf[aria-pressed="true"] {
+            background:#28764e !important;color:#fff !important;
+            border:1px solid #54d99a !important;
+            box-shadow:0 0 12px rgba(74,220,144,.4) !important;
+          }
           """
           html = html.replace(anchor, css + anchor, 1)
+          assert 'data-crime-toggle-15' in html and 'id="crimeOneHalf"' in html
           contents['index.html'] = html.encode('utf-8')
           manifest['version'] = '2.2.47'
           for name in manifest['sha256']:
               manifest['sha256'][name] = hashlib.sha256(contents[name]).hexdigest()
           contents['manifest.json'] = (json.dumps(manifest, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
-          out = Path('CraftPlanner_UI_Update_v2.2.47.zip')
+          out = Path('CraftPlanner_UI_Update_v2.2.48.zip')
           with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED) as z:
               for name, data in contents.items():
                   z.writestr(name, data)
@@ -72,12 +83,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view v2.2.47 >/dev/null 2>&1; then
-            echo 'v2.2.47 already exists; refusing to overwrite it' >&2
+          if gh release view v2.2.48 >/dev/null 2>&1; then
+            echo 'v2.2.48 already exists; refusing to overwrite it' >&2
             exit 1
           fi
-          gh release create v2.2.47 CraftPlanner_UI_Update_v2.2.47.zip             --title 'Craft Planner UI v2.2.47'             --notes 'Fix: crime list ×1.5 button no longer glows when OFF.'             --latest
-          gh release view v2.2.47 --json assets --jq '.assets[].name' | grep -Fx 'CraftPlanner_UI_Update_v2.2.47.zip'
+          gh release create v2.2.48 CraftPlanner_UI_Update_v2.2.48.zip             --title 'Craft Planner UI v2.2.48'             --notes 'Fix: list and detail ×1.5 buttons do not glow when OFF.'             --latest
+          gh release view v2.2.48 --json assets --jq '.assets[].name' | grep -Fx 'CraftPlanner_UI_Update_v2.2.48.zip'
       - name: Update automatic updater metadata
         shell: bash
         run: |
@@ -96,5 +107,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add latest-ui.json
-          git commit -m 'Publish Craft Planner UI v2.2.47'
+          git commit -m 'Publish Craft Planner UI v2.2.48'
           git push
