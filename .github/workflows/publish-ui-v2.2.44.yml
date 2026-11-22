@@ -1,0 +1,75 @@
+name: Publish v2.2.44 UI update from verified build
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: publish-ui-feed
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download private build artifact
+        env:
+          PRIVATE_TOKEN: ${{ secrets.CRAFTPLANNER_PRIVATE_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PRIVATE_TOKEN" ]; then echo "::error::Set CRAFTPLANNER_PRIVATE_READ_TOKEN (fine-grained PAT: Actions read on private source repo)"; exit 1; fi
+          curl -fLsS --retry 3 -H "Authorization: Bearer $PRIVATE_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/TAKO041709/CraftPlanne/actions/artifacts/14711022153/zip" -o artifact.zip
+      - name: Verify source and package new UI release
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib,io,json,zipfile
+          from pathlib import Path
+          outer=zipfile.ZipFile('artifact.zip')
+          candidates=[n for n in outer.namelist() if n.endswith('CraftPlanner_UI_Update_v2.2.43.zip')]
+          if len(candidates)!=1: raise SystemExit('Expected one v2.2.43 UI ZIP in artifact: '+repr(outer.namelist()))
+          raw=outer.read(candidates[0])
+          feeds=[n for n in outer.namelist() if n.endswith('latest-ui.json')]
+          if len(feeds)!=1: raise SystemExit('Expected one source feed')
+          source_feed=json.loads(outer.read(feeds[0]))
+          if source_feed.get('version')!='2.2.43' or hashlib.sha256(raw).hexdigest()!=source_feed.get('sha256'): raise SystemExit('Source artifact SHA256 mismatch')
+          src=zipfile.ZipFile(io.BytesIO(raw))
+          expected={'manifest.json','index.html','settings.html','chat.html','chat.js','app-shell.js'}
+          if set(src.namelist())!=expected or len(src.namelist())!=len(expected): raise SystemExit('Unexpected UI source contents')
+          m=json.loads(src.read('manifest.json'))
+          if m.get('version')!='2.2.43' or set(m.get('files',{}))!=expected-{'manifest.json'}: raise SystemExit('Invalid source manifest')
+          for n,h in m['files'].items():
+              if hashlib.sha256(src.read(n)).hexdigest()!=h: raise SystemExit('Source file hash mismatch: '+n)
+          # v2.2.44 adds a visible UI update test marker in Settings, without touching installer or app main process.
+          assets={n:src.read(n) for n in expected-{'manifest.json'}}
+          settings=assets['settings.html'].decode('utf-8')
+          needle='<h1>設定</h1>'
+          if settings.count(needle)!=1: raise SystemExit('Settings layout differs from expected build')
+          settings=settings.replace(needle,needle+'<p class="sub" id="ui-update-build">UI更新テスト v2.2.44</p>',1)
+          assets['settings.html']=settings.encode('utf-8')
+          manifest={'version':'2.2.44','files':{n:hashlib.sha256(assets[n]).hexdigest() for n in sorted(assets)}}
+          target=Path('CraftPlanner_UI_Update_v2.2.44.zip')
+          with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as z:
+              z.writestr('manifest.json',json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
+              for n in sorted(assets):z.writestr(n,assets[n])
+          with zipfile.ZipFile(target) as z:
+              for n,h in manifest['files'].items():
+                  if hashlib.sha256(z.read(n)).hexdigest()!=h: raise SystemExit('Output hash mismatch: '+n)
+          old=json.loads(Path('latest-ui.json').read_text())
+          if tuple(map(int,old['version'].split('.'))) >= (2,2,44): raise SystemExit('Feed is already v2.2.44 or newer')
+          feed={'version':'2.2.44','url':'https://github.com/TAKO041709/CraftPlanner-Updates/releases/download/v2.2.44/'+target.name,'sha256':hashlib.sha256(target.read_bytes()).hexdigest()}
+          Path('latest-ui.json').write_text(json.dumps(feed,indent=2)+'\n')
+          print('Verified source v2.2.43; built UI-only v2.2.44')
+          PY
+      - name: Create release first
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v2.2.44 CraftPlanner_UI_Update_v2.2.44.zip --title "Craft Planner UI v2.2.44" --notes "UI-only update verification. Settings displays UI update test marker. No installer or uninstall changes."
+      - name: Activate feed
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add latest-ui.json
+          git commit -m "Publish verified UI update v2.2.44"
+          git push
