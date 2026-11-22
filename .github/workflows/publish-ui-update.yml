@@ -44,7 +44,7 @@ jobs:
           html = html.replace(amount, "crimeBaseAmount(x)*((window.__cpGlobalFineEnabled || crimeListMultiplier.has(x.id))?1.5:1)")
           assert "let enabled=false,scheduled=false;" in html
           html = html.replace("let enabled=false,scheduled=false;", "let enabled=false,scheduled=false; window.__cpGlobalFineEnabled=false;", 1)
-          click_old = "\\n".join([
+          click_old = "\n".join([
               "    const current=findButtons();",
               "    for(const btn of current){",
               "     const isOn=/ON|オン/i.test(btn.textContent||'')&&!/OFF/i.test(btn.textContent||'');",
@@ -52,7 +52,7 @@ jobs:
               "    }",
               "    schedule();"
           ])
-          click_new = "\\n".join([
+          click_new = "\n".join([
               "    window.__cpGlobalFineEnabled=enabled;",
               "    if(typeof refRender==='function')refRender();",
               "    schedule();"
